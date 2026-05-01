@@ -1,0 +1,4 @@
+[test]
+# Tests hook the same `add` function and share global statics (CALL_COUNT, ORIGINAL).
+# Running them in parallel causes data races and spurious failures.
+args = ["--test-threads=1"]
