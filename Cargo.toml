@@ -5,7 +5,7 @@ edition = "2024"
 description = "Rust hooking library for x86 (32 and 64 bit) based on subhook from Zeex. Should work on Windows and Macos, Linux was tested."
 license = "BSD-2-Clause"
 readme = "README.md"
-keywords = ["subhook", "hook", "windows", "linux", "macos", "x86", "x64"]
+keywords = ["subhook", "hook", "x86", "x64", "detour"]
 repository = "https://github.com/EKQRCalamity/subhook-rs"
 
 [dependencies]
