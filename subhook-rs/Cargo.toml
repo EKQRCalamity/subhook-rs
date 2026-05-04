@@ -1,11 +1,11 @@
 [package]
 name = "subhook-rs"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
-description = "Rust hooking library for x86 (32 and 64 bit) based on subhook from Zeex. Should work on Windows and Macos, Linux was tested."
+description = "Rust hooking library for x86 (32 and 64 bit) and RISC-V (32 and 64 bit). Based on subhook from Zeex. Linux was tested but Windows and MacOS should work as well."
 license = "BSD-2-Clause"
 readme = "../README.md"
-keywords = ["subhook", "hook", "x86", "x64", "detour"]
+keywords = ["hook", "x86", "riscv", "detour"]
 repository = "https://github.com/EKQRCalamity/subhook-rs"
 
 [dependencies]
@@ -27,3 +27,14 @@ riscv = ["dep:libc", "dep:windows-sys"]
 riscv_subhook = ["riscv"]
 x86_fam_subhook = ["x86_fam"]
 x86_64_Zeex = ["x86_fam_subhook"]
+
+[package.metadata.docs.rs]
+targets = [
+  "i686-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-msvc",
+  "riscv32imac-unknown-none-elf",
+  "riscv64gc-unknown-linux-gnu"
+]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
