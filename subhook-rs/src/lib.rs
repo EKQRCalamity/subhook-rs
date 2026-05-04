@@ -1,6 +1,6 @@
 pub mod error;
 pub mod arch {
-	#[cfg(feature = "x86_fam")]
+	#[cfg(all(feature = "x86_fam", any(target_arch = "x86_64", target_arch = "x86")))]
 	pub mod x86_fam {
 		#[cfg(feature = "x86_64_Zeex")]
 		pub mod subhook;
