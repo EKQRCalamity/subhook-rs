@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 description = "Procedural macros for subhook-rs"
 license = "BSD-2-Clause"
+readme = "README.md"
+keywords = []
+repository = "https://github.com/EKQRCalamity/subhook-rs"
 
 [lib]
 proc-macro = true
