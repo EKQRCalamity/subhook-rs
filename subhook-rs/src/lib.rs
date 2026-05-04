@@ -1,3 +1,5 @@
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub mod error;
 pub mod arch {
 	/// x86/x86_64 inline hooking with PC-relative instruction relocation.
