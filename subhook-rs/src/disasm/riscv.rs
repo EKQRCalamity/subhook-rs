@@ -1,18 +1,9 @@
 use crate::error::HookError;
 
-// RISC-V base opcodes (bits [6:2])
-const OPCODE_AUIPC: u8 = 0b00101;
-const OPCODE_JAL: u8 = 0b11011;
-const OPCODE_JALR: u8 = 0b11001;
-const OPCODE_BRANCH: u8 = 0b11000;
-const OPCODE_LOAD: u8 = 0b00000;
-const OPCODE_STORE: u8 = 0b01000;
-const OPCODE_OP_IMM: u8 = 0b00100;
-const OPCODE_OP: u8 = 0b01100;
-const OPCODE_LUI: u8 = 0b01101;
-const OPCODE_SYSTEM: u8 = 0b11100;
+const OPCODE_AUIPC: u8 = 0b0010111;
+const OPCODE_JAL: u8 = 0b1101111;
+const OPCODE_BRANCH: u8 = 0b1100011;
 
-const QUADRANT_C0: u8 = 0b00;
 const QUADRANT_C1: u8 = 0b01;
 const QUADRANT_C2: u8 = 0b10;
 
@@ -62,7 +53,7 @@ fn disasm_compressed(insn: u16) -> Result<(usize, Option<usize>), HookError> {
 }
 
 fn disasm_standard(insn: u32) -> Result<(usize, Option<usize>), HookError> {
-	let opcode = ((insn >> 2) & 0b11111) as u8;
+	let opcode = (insn & 0x7F) as u8;
 
 	let needs_relocation = match opcode {
 		OPCODE_AUIPC | OPCODE_JAL | OPCODE_BRANCH => true,
