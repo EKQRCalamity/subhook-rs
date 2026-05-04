@@ -1,4 +1,4 @@
-use crate::arch_86_64_zeex::shared::disasm::disasm;
+use crate::disasm::x86_fam::disasm;
 
 #[test]
 fn decode_nop() {

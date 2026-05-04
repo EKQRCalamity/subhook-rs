@@ -1,9 +1,8 @@
-use crate::arch_86_64_zeex::mem;
-use crate::arch_86_64_zeex::shared::disasm;
-pub use crate::error;
-pub use crate::arch_86_64_zeex::shared::hookflags::HookFlags;
-use crate::arch_86_64_zeex::shared::jmp;
-use crate::error::HookError;
+use crate::mem;
+use crate::disasm::x86_fam::disasm;
+pub use crate::error::HookError;
+pub use crate::arch::x86_fam::subhook::shared::hookflags::HookFlags;
+use crate::arch::x86_fam::subhook::shared::jmp;
 
 use std::ptr;
 
@@ -125,7 +124,7 @@ unsafe fn build_trampoline(src: *const u8, jmp_size: usize, trampoline_size: usi
 			)
 		};
 
-		let (instruction_len, relocation_opcode_offset) = disasm::disasm(remaining).inspect_err(|_| {
+		let (instruction_len, relocation_opcode_offset) = disasm(remaining).inspect_err(|_| {
 			unsafe { mem::free_code(buffer, trampoline_size) };
 		})?;
 
@@ -165,37 +164,12 @@ unsafe fn build_trampoline(src: *const u8, jmp_size: usize, trampoline_size: usi
 	Ok(Trampoline { ptr: buffer, size: trampoline_size })
 }
 
-/// Removes a hook on construction and reinstalls it on drop.
-/// Useful for calling the original function from within a hook handler.
-pub struct ScopedRemove<'a> {
-	hook:    &'a mut Hook,
-	removed: bool,
-}
-
-impl<'a> ScopedRemove<'a> {
-	pub fn new(hook: &'a mut Hook) -> Self {
-		let removed = hook.remove().is_ok();
-		Self { hook, removed }
+impl crate::common::scoped_remove::Hookable for Hook {
+	fn install(&mut self) -> Result<(), HookError> {
+		self.install()
 	}
 
-	/// Returns a shared reference to the inner `Hook`.
-	pub fn inner(&self) -> &Hook {
-		self.hook
-	}
-
-	/// Returns `true` if the hook was successfully removed when this guard was created.
-	///
-	/// Returns `false` if the hook was not installed at construction time, in which
-  /// case the guard is a no-op and no reinstall will occur on drop.
-	pub fn removed(&self) -> bool {
-		self.removed
-	}
-}
-
-impl Drop for ScopedRemove<'_> {
-	fn drop(&mut self) {
-		if self.removed {
-			let _ = self.hook.install();
-		}
+	fn remove(&mut self) -> Result<(), HookError> {
+		self.remove()
 	}
 }

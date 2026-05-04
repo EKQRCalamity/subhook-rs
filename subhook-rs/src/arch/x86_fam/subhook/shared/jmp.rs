@@ -1,4 +1,4 @@
-use crate::{error::HookError, arch_86_64_zeex::shared::hookflags::HookFlags};
+use crate::{error::HookError, arch::x86_fam::subhook::shared::hookflags::HookFlags};
 
 const JMP_OPCODE:  u8 = 0xE9;
 const PUSH_OPCODE: u8 = 0x68;

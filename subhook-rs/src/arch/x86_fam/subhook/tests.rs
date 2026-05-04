@@ -1,4 +1,4 @@
-use crate::{arch_86_64_zeex::subhook::{Hook, HookFlags, ScopedRemove}, error};
+use crate::{arch::x86_fam::subhook::{Hook, HookFlags}, common::scoped_remove::ScopedRemove, error};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 #[inline(never)]
@@ -111,5 +111,63 @@ fn scoped_remove_restores_and_reinstalls() {
     assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
 
     hook.remove().ok();
+}
+
+// Test using the #[hook] proc macro for cleaner function definitions
+#[test]
+fn test_hook_macro() {
+    use crate::hook;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static HOOK_CALLED: AtomicBool = AtomicBool::new(false);
+    static mut ORIGINAL_MULTIPLY: Option<unsafe extern "C" fn(u32, u32) -> u32> = None;
+
+    // Define functions using the #[hook] proc macro
+    #[hook]
+    fn multiply(a: u32, b: u32) -> u32 {
+        a * b
+    }
+
+    #[hook]
+    fn multiply_hook(a: u32, b: u32) -> u32 {
+        HOOK_CALLED.store(true, Ordering::SeqCst);
+        unsafe {
+            if let Some(orig) = ORIGINAL_MULTIPLY {
+                orig(a, b) * 2  // Double the original result
+            } else {
+                0
+            }
+        }
+    }
+
+    // Test the original function
+    assert_eq!(multiply(3, 4), 12);
+    assert!(!HOOK_CALLED.load(Ordering::SeqCst));
+
+    // Create and install hook
+    let mut hook = unsafe {
+        Hook::new(
+            multiply as *mut u8,
+            multiply_hook as *const u8,
+            HookFlags::NONE,
+        )
+        .expect("Failed to create hook")
+    };
+
+    unsafe {
+        ORIGINAL_MULTIPLY = hook.trampoline().map(|p| std::mem::transmute(p));
+    }
+
+    hook.install().expect("Failed to install hook");
+
+    // Test with hook installed
+    let result = multiply(3, 4);
+    assert_eq!(result, 24);  // 3 * 4 * 2
+    assert!(HOOK_CALLED.load(Ordering::SeqCst));
+
+    // Clean up
+    hook.remove().ok();
+    HOOK_CALLED.store(false, Ordering::SeqCst);
+    assert_eq!(multiply(3, 4), 12);
 }
 

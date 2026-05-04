@@ -1,4 +1,3 @@
-pub mod disasm;
 pub mod hookflags;
 pub (crate) mod jmp;
 #[cfg(test)]

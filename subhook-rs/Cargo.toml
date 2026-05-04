@@ -1,0 +1,26 @@
+[package]
+name = "subhook-rs"
+version = "0.1.0"
+edition = "2024"
+description = "Rust hooking library for x86 (32 and 64 bit) based on subhook from Zeex. Should work on Windows and Macos, Linux was tested."
+license = "BSD-2-Clause"
+readme = "../README.md"
+keywords = ["subhook", "hook", "x86", "x64", "detour"]
+repository = "https://github.com/EKQRCalamity/subhook-rs"
+
+[dependencies]
+subhook-rs-macros = { path = "../subhook-rs-macros", version = "0.1.0" }
+
+[target.'cfg(unix)'.dependencies]
+libc = { version = "0.2.186", optional = true}
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+  "Win32_System_Memory",
+  "Win32_Foundation"
+], optional = true}
+
+[features]
+default = ["x86_64_Zeex"]
+x86_fam = []
+x86_64_Zeex = [ "x86_fam", "dep:libc", "dep:windows-sys" ]
