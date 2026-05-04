@@ -9,7 +9,7 @@ keywords = ["subhook", "hook", "x86", "x64", "detour"]
 repository = "https://github.com/EKQRCalamity/subhook-rs"
 
 [dependencies]
-subhook-rs-macros = { path = "../subhook-rs-macros", version = "1.0.0" }
+subhook-rs-macros = "1.0.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2.186", optional = true}

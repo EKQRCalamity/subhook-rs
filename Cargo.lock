@@ -31,13 +31,24 @@ name = "subhook-rs"
 version = "0.2.0"
 dependencies = [
  "libc",
- "subhook-rs-macros",
+ "subhook-rs-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "windows-sys",
 ]
 
 [[package]]
 name = "subhook-rs-macros"
 version = "1.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "subhook-rs-macros"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ff0ec28f6591a1f946b8e19530a21eeabf5b8da259409fd9ff66722a6b3c5c7"
 dependencies = [
  "proc-macro2",
  "quote",
