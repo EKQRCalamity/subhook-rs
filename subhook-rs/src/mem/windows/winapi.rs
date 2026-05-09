@@ -11,15 +11,15 @@ use windows_sys::Win32::System::Memory::{
 /// error code.
 pub(crate) unsafe fn unprotect(addr: *mut u8, size: usize) -> Result<(), HookError> {
     let mut old_flags: u32 = 0;
-    let result = VirtualProtect(
+    let result = unsafe { VirtualProtect(
         addr as *const _,
         size,
         PAGE_EXECUTE_READWRITE,
         &mut old_flags,
-    );
+    ) };
     if result == 0 {
         // GetLastError() would be more precise but i32 cast is fine for our error type.
-        Err(HookError::UnprotectFailed(windows_sys::Win32::Foundation::GetLastError() as i32))
+        Err(HookError::UnprotectFailed(unsafe { windows_sys::Win32::Foundation::GetLastError() } as i32))
     } else {
         Ok(())
     }
@@ -30,12 +30,12 @@ pub(crate) unsafe fn unprotect(addr: *mut u8, size: usize) -> Result<(), HookErr
 /// Returns an empty `Result` or a hook error of type `HookError::AllocationFailed` with the OS
 /// error code.
 pub(crate) unsafe fn alloc_code(size: usize) -> Result<*mut u8, HookError> {
-    let ptr = VirtualAlloc(
+    let ptr = unsafe { VirtualAlloc(
         std::ptr::null(),
         size,
         MEM_COMMIT | MEM_RESERVE,
         PAGE_EXECUTE_READWRITE,
-    );
+    ) };
     if ptr.is_null() {
         Err(HookError::AllocationFailed(unsafe { windows_sys::Win32::Foundation::GetLastError() } as i32))
     } else {
@@ -46,7 +46,7 @@ pub(crate) unsafe fn alloc_code(size: usize) -> Result<*mut u8, HookError> {
 /// Release memory previously allocated via `alloc_code`.
 pub(crate) unsafe fn free_code(addr: *mut u8, _size: usize) {
     if !addr.is_null() {
-        VirtualFree(addr as *mut _, 0, MEM_RELEASE);
+        unsafe { VirtualFree(addr as *mut _, 0, MEM_RELEASE) };
     }
 }
 
@@ -56,8 +56,10 @@ mod thread {
     use windows_sys::Win32::System::Threading::{SuspendThread, ResumeThread};
     use windows_sys::Win32::System::Diagnostics::Debug::{
         GetThreadContext, SetThreadContext, CONTEXT,
-        CONTEXT_CONTROL_AMD64, CONTEXT_CONTROL_X86,
+        CONTEXT_CONTROL_AMD64,
     };
+    #[cfg(target_arch = "x86")]
+    use windows_sys::Win32::System::Diagnostics::Debug::CONTEXT_CONTROL_X86;
     use crate::error::HookError;
 
     pub(crate) unsafe fn suspend_thread(handle: HANDLE) -> Result<(), HookError> {
