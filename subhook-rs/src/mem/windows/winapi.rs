@@ -49,3 +49,73 @@ pub(crate) unsafe fn free_code(addr: *mut u8, _size: usize) {
         VirtualFree(addr as *mut _, 0, MEM_RELEASE);
     }
 }
+
+#[cfg(feature = "thread_suspend")]
+mod thread {
+    use windows_sys::Win32::Foundation::{HANDLE, GetLastError};
+    use windows_sys::Win32::System::Threading::{SuspendThread, ResumeThread};
+    use windows_sys::Win32::System::Diagnostics::Debug::{
+        GetThreadContext, SetThreadContext, CONTEXT,
+        CONTEXT_CONTROL_AMD64, CONTEXT_CONTROL_X86,
+    };
+    use crate::error::HookError;
+
+    pub(crate) unsafe fn suspend_thread(handle: HANDLE) -> Result<(), HookError> {
+        if unsafe { SuspendThread(handle) } == u32::MAX {
+            Err(HookError::ThreadOperationFailed(unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) unsafe fn resume_thread(handle: HANDLE) -> Result<(), HookError> {
+        if unsafe { ResumeThread(handle) } == u32::MAX {
+            Err(HookError::ThreadOperationFailed(unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) unsafe fn get_thread_ip(handle: HANDLE) -> Result<usize, HookError> {
+        let mut ctx = unsafe { std::mem::zeroed::<CONTEXT>() };
+        #[cfg(target_arch = "x86_64")]
+        { ctx.ContextFlags = CONTEXT_CONTROL_AMD64; }
+        #[cfg(target_arch = "x86")]
+        { ctx.ContextFlags = CONTEXT_CONTROL_X86; }
+
+        if unsafe { GetThreadContext(handle, &mut ctx) } == 0 {
+            return Err(HookError::ThreadOperationFailed(unsafe { GetLastError() }));
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        { Ok(ctx.Rip as usize) }
+        #[cfg(target_arch = "x86")]
+        { Ok(ctx.Eip as usize) }
+    }
+
+    pub(crate) unsafe fn set_thread_ip(handle: HANDLE, ip: usize) -> Result<(), HookError> {
+        let mut ctx = unsafe { std::mem::zeroed::<CONTEXT>() };
+        #[cfg(target_arch = "x86_64")]
+        { ctx.ContextFlags = CONTEXT_CONTROL_AMD64; }
+        #[cfg(target_arch = "x86")]
+        { ctx.ContextFlags = CONTEXT_CONTROL_X86; }
+
+        if unsafe { GetThreadContext(handle, &mut ctx) } == 0 {
+            return Err(HookError::ThreadOperationFailed(unsafe { GetLastError() }));
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        { ctx.Rip = ip as u64; }
+        #[cfg(target_arch = "x86")]
+        { ctx.Eip = ip as u32; }
+
+        if unsafe { SetThreadContext(handle, &ctx) } == 0 {
+            Err(HookError::ThreadOperationFailed(unsafe { GetLastError() }))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(feature = "thread_suspend")]
+pub(crate) use thread::{suspend_thread, resume_thread, get_thread_ip, set_thread_ip};

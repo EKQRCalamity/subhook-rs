@@ -30,7 +30,13 @@ pub enum HookError {
 	/// Carries the distance in bytes.
 	TrampolineRelocateOverflow(i64),
 	/// The input slice was truncated and full decoding of instruction was not possible.
-	TruncatedInstruction
+	TruncatedInstruction,
+	/// Trampoline construction failed, but is required
+	NoTrampoline,
+	/// A Windows thread operation failed.
+	/// Carries the OS error code.
+	#[cfg(all(windows, feature = "thread_suspend"))]
+	ThreadOperationFailed(u32),
 }
 
 impl Display for NullPointerSource {
@@ -54,6 +60,9 @@ impl Display for HookError {
 			Self::UnknownInstruction(opcode) => write!(f, "Dissassambler encountered unrecognized opcode 0x{opcode:02X}"),
 			Self::TrampolineRelocateOverflow(dist) => write!(f, "Trampoline distance ({} bytes) too large to relocate rel32 operand.", dist),
 			Self::TruncatedInstruction => write!(f, "Instruction data ended unexpectedly, could not fully decode instruction."),
+			Self::NoTrampoline => write!(f, "No trampoline available; thread-safe install/remove requires a trampoline to remap thread IPs"),
+			#[cfg(all(windows, feature = "thread_suspend"))]
+			Self::ThreadOperationFailed(code) => write!(f, "Thread operation failed (OS Error: {})", code),
 		}
 	}
 }

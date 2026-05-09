@@ -86,6 +86,113 @@ impl Hook {
 		self.installed
 	}
 
+	/// Install the hook while suspending a set of threads for the duration, remapping any thread
+	/// whose instruction pointer falls inside the overwritten prologue.
+	///
+	/// Requires the `thread_suspend` feature and a Windows target.
+	/// Returns `HookError::NoTrampoline` if no trampoline was built during `Hook::new`.
+	///
+	/// # Safety
+	/// All handles in `threads` must be valid, open thread handles with
+	/// `THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT` access rights.
+	/// Do not pass the handle of the calling thread.
+	#[cfg(all(windows, feature = "thread_suspend"))]
+	pub unsafe fn install_with_threads(
+		&mut self,
+		threads: &[windows_sys::Win32::Foundation::HANDLE],
+	) -> Result<(), HookError> {
+		if self.installed {
+			return Err(HookError::AlreadyInstalled);
+		}
+		if self.trampoline.is_none() {
+			return Err(HookError::NoTrampoline);
+		}
+
+		for &h in threads {
+			unsafe { crate::mem::suspend_thread(h) }?;
+		}
+
+		let result = unsafe {
+			jmp::write_jmp(self.src, self.src as usize, self.dst as usize, self.flags)
+		};
+
+		if result.is_ok() {
+			self.installed = true;
+
+			if let Some(ref tramp) = self.trampoline {
+				let src = self.src as usize;
+				let tramp_base = tramp.ptr as usize;
+				let patch_end = src + self.jmp_size;
+
+				for &h in threads {
+					if let Ok(ip) = unsafe { crate::mem::get_thread_ip(h) } {
+						if ip >= src && ip < patch_end {
+							let _ = unsafe { crate::mem::set_thread_ip(h, tramp_base + (ip - src)) };
+						}
+					}
+				}
+			}
+		}
+
+		for &h in threads {
+			let _ = unsafe { crate::mem::resume_thread(h) };
+		}
+
+		result
+	}
+
+	/// Remove the hook while suspending a set of threads for the duration, remapping any thread
+	/// whose instruction pointer falls inside the trampoline's copied bytes.
+	///
+	/// Requires the `thread_suspend` feature and a Windows target.
+	///
+	/// # Safety
+	/// All handles in `threads` must be valid, open thread handles with
+	/// `THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_SET_CONTEXT` access rights.
+	/// Do not pass the handle of the calling thread.
+	#[cfg(all(windows, feature = "thread_suspend"))]
+	pub unsafe fn remove_with_threads(
+		&mut self,
+		threads: &[windows_sys::Win32::Foundation::HANDLE],
+	) -> Result<(), HookError> {
+		if !self.installed {
+			return Err(HookError::NotInstalled);
+		}
+
+		for &h in threads {
+			unsafe { crate::mem::suspend_thread(h) }?;
+		}
+
+		unsafe {
+			ptr::copy_nonoverlapping(
+				self.saved_bytes.as_ptr(),
+				self.src,
+				self.jmp_size,
+			)
+		};
+		self.installed = false;
+
+		if let Some(ref tramp) = self.trampoline {
+			let src = self.src as usize;
+			let tramp_base = tramp.ptr as usize;
+			let patch_end = tramp_base + self.jmp_size;
+
+			for &h in threads {
+				if let Ok(ip) = unsafe { crate::mem::get_thread_ip(h) } {
+					if ip >= tramp_base && ip < patch_end {
+						let _ = unsafe { crate::mem::set_thread_ip(h, src + (ip - tramp_base)) };
+					}
+				}
+			}
+		}
+
+		for &h in threads {
+			let _ = unsafe { crate::mem::resume_thread(h) };
+		}
+
+		Ok(())
+	}
+
 	/// Returns a pointer to the trampoline, or `None` if one could not be built.
 	///
 	/// Call through the trampoline to invoke the original function while the

@@ -14,6 +14,7 @@ By default, both x86 and RISC-V subhook implementations are enabled. You can con
 - `riscv` - Enables RISC-V (32 and 64 bit) architecture support (pulls in OS dependencies)
 - `riscv_subhook` - Enables the subhook implementation for RISC-V (requires `riscv`)
 - `x86_64_Zeex` - Legacy compatibility feature, will be removed later (same as `x86_fam_subhook`)
+- `thread_suspend` - Enables `install_with_threads` / `remove_with_threads` on Windows, which suspend provided threads during hook installation and remap any thread whose instruction pointer falls inside the patched prologue into the trampoline (requires `x86_fam_subhook`)
 
 The split between base architecture features (`x86_fam`, `riscv`) and implementation features (`x86_fam_subhook`, `riscv_subhook`) lets you pick exactly which hooking implementation you want. When I add other implementations later (like VTable, PLT, IAT, ...), you'll be able to choose between them without pulling in code you don't need.
 

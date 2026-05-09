@@ -1,6 +1,6 @@
 [package]
 name = "subhook-rs"
-version = "0.2.2"
+version = "0.3.2"
 edition = "2024"
 description = "Rust hooking library for x86 (32 and 64 bit) and RISC-V (32 and 64 bit). Based on subhook from Zeex. Linux was tested but Windows and MacOS should work as well."
 license = "BSD-2-Clause"
@@ -17,6 +17,8 @@ libc = { version = "0.2.186", optional = true}
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
   "Win32_System_Memory",
+  "Win32_System_Threading",
+  "Win32_System_Diagnostics_Debug",
   "Win32_Foundation"
 ], optional = true}
 
@@ -27,6 +29,7 @@ riscv = ["dep:libc", "dep:windows-sys"]
 riscv_subhook = ["riscv"]
 x86_fam_subhook = ["x86_fam"]
 x86_64_Zeex = ["x86_fam_subhook"]
+thread_suspend = ["x86_fam_subhook"]
 
 [package.metadata.docs.rs]
 targets = [

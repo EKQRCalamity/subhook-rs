@@ -13,3 +13,6 @@ pub (crate) use unix::libc::{alloc_code, free_code, unprotect};
 
 #[cfg(windows)]
 pub (crate) use windows::winapi::{alloc_code, free_code, unprotect};
+
+#[cfg(all(windows, feature = "thread_suspend"))]
+pub(crate) use windows::winapi::{suspend_thread, resume_thread, get_thread_ip, set_thread_ip};
