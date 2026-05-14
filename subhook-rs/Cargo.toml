@@ -2,11 +2,11 @@
 name = "subhook-rs"
 version = "0.3.4"
 edition = "2024"
-description = "Rust hooking library for x86 (32 and 64 bit) and RISC-V (32 and 64 bit). Based on subhook from Zeex. Linux was tested but Windows and MacOS should work as well."
+description = "Rust hooking library for x86 (32 and 64 bit) and RISC-V (32 and 64 bit). Based on subhook from Zeex. Linux and Windows were tested, MacOS should work as well."
 license = "BSD-2-Clause"
 readme = "../README.md"
 keywords = ["hook", "x86", "riscv", "detour"]
-repository = "https://github.com/EKQRCalamity/subhook-rs"
+repository = "https://codeberg.org/EKQRCalamity/subhook-rs"
 
 [dependencies]
 subhook-rs-macros = "1.0.0"
