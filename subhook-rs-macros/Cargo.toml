@@ -6,7 +6,7 @@ description = "Procedural macros for subhook-rs"
 license = "BSD-2-Clause"
 readme = "README.md"
 keywords = []
-repository = "https://github.com/EKQRCalamity/subhook-rs"
+repository = "https://codeberg.org/EKQRCalamity/subhook-rs"
 
 [lib]
 proc-macro = true
