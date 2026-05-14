@@ -42,8 +42,6 @@ impl Hook {
 		
 		let saved_bytes = unsafe { std::slice::from_raw_parts(src, jmp_size) }.to_vec();
 
-		unsafe { mem::unprotect(src, jmp_size ) }?;
-
 		let tail_jmp_size = jmp::tail_jmp_size();
 		let trampoline_size = jmp_size + MAX_INSTRUCTION_LEN + tail_jmp_size;
 		let trampoline = unsafe { build_trampoline(src, jmp_size, trampoline_size) }.ok();
@@ -55,9 +53,16 @@ impl Hook {
 		if self.installed {
 			return Err(HookError::AlreadyInstalled);
 		}
+		let mut patch = vec![0u8; self.jmp_size];
 		unsafe {
-			jmp::write_jmp(self.src, self.src as usize, self.dst as usize, self.flags)
+			jmp::write_jmp(
+				patch.as_mut_ptr(),
+				self.src as usize,
+				self.dst as usize,
+				self.flags,
+			)
 		}?;
+		unsafe { mem::patch_bytes(self.src, patch.as_ptr(), self.jmp_size) }?;
 		self.installed = true;
 		Ok(())
 	}
@@ -66,13 +71,7 @@ impl Hook {
 		if !self.installed {
 			return Err(HookError::NotInstalled);
 		}
-		unsafe {
-			ptr::copy_nonoverlapping(
-				self.saved_bytes.as_ptr(),
-				self.src,
-				self.jmp_size,
-			)
-		};
+		unsafe { mem::patch_bytes(self.src, self.saved_bytes.as_ptr(), self.jmp_size) }?;
 		self.installed = false;
 		Ok(())
 	}

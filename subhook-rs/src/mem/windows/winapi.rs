@@ -4,22 +4,56 @@ use windows_sys::Win32::System::Memory::{
     MEM_COMMIT, MEM_RELEASE, MEM_RESERVE,
     PAGE_EXECUTE_READWRITE,
 };
+use windows_sys::Win32::System::Diagnostics::Debug::FlushInstructionCache;
+use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
-/// Try to make `size` bytes starting at `addr` readable, writable, and executable.
-///
-/// Returns an empty `Result` or a hook error of type `HookError::UnprotectFailed` with the OS
-/// error code.
-pub(crate) unsafe fn unprotect(addr: *mut u8, size: usize) -> Result<(), HookError> {
+/// Temporarily switch a code region to RWX and return the previous page flags.
+pub(crate) unsafe fn unprotect_with_old(addr: *mut u8, size: usize) -> Result<u32, HookError> {
     let mut old_flags: u32 = 0;
-    let result = unsafe { VirtualProtect(
-        addr as *const _,
-        size,
-        PAGE_EXECUTE_READWRITE,
-        &mut old_flags,
-    ) };
+    let result = unsafe {
+        VirtualProtect(
+            addr as *const _,
+            size,
+            PAGE_EXECUTE_READWRITE,
+            &mut old_flags,
+        )
+    };
     if result == 0 {
-        // GetLastError() would be more precise but i32 cast is fine for our error type.
-        Err(HookError::UnprotectFailed(unsafe { windows_sys::Win32::Foundation::GetLastError() } as i32))
+        Err(HookError::UnprotectFailed(unsafe {
+            windows_sys::Win32::Foundation::GetLastError()
+        } as i32))
+    } else {
+        Ok(old_flags)
+    }
+}
+
+/// Restore a previously saved page protection value.
+pub(crate) unsafe fn reprotect(addr: *mut u8, size: usize, old_flags: u32) -> Result<(), HookError> {
+    let mut prev: u32 = 0;
+    let result = unsafe {
+        VirtualProtect(
+            addr as *const _,
+            size,
+            old_flags,
+            &mut prev,
+        )
+    };
+    if result == 0 {
+        Err(HookError::UnprotectFailed(unsafe {
+            windows_sys::Win32::Foundation::GetLastError()
+        } as i32))
+    } else {
+        Ok(())
+    }
+}
+
+/// Flush CPU instruction cache for freshly patched code bytes.
+pub(crate) unsafe fn flush_icache(addr: *mut u8, size: usize) -> Result<(), HookError> {
+    let result = unsafe { FlushInstructionCache(GetCurrentProcess(), addr as *const _, size) };
+    if result == 0 {
+        Err(HookError::UnprotectFailed(unsafe {
+            windows_sys::Win32::Foundation::GetLastError()
+        } as i32))
     } else {
         Ok(())
     }
@@ -41,6 +75,53 @@ pub(crate) unsafe fn alloc_code(size: usize) -> Result<*mut u8, HookError> {
     } else {
         Ok(ptr as *mut u8)
     }
+}
+
+/// Allocate `size` bytes of RWX memory within 2 GB of `near`.
+///
+/// Scans aligned pages from `near` outward so that rel32 relocations in copied
+/// prologues remain representable.  Falls back to unconstrained allocation if
+/// no near page is available.
+pub(crate) unsafe fn alloc_code_near(near: *const u8, size: usize) -> Result<*mut u8, HookError> {
+    use windows_sys::Win32::System::Memory::{VirtualQuery, MEMORY_BASIC_INFORMATION};
+
+    const GRANULARITY: usize = 0x10000;
+    const MAX_RANGE: usize = 0x7FFF0000;
+
+    let origin = near as usize;
+
+    let mut lo = origin.saturating_sub(GRANULARITY) & !(GRANULARITY - 1);
+    let mut hi = (origin + GRANULARITY) & !(GRANULARITY - 1);
+
+    for _ in 0..(MAX_RANGE / GRANULARITY) {
+        // Forward candidate
+        if hi < origin.saturating_add(MAX_RANGE) {
+            let mut mbi = unsafe { std::mem::zeroed::<MEMORY_BASIC_INFORMATION>() };
+            let ok = unsafe { VirtualQuery(hi as *const _, &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>()) };
+            if ok != 0 && mbi.State == windows_sys::Win32::System::Memory::MEM_FREE {
+                let ptr = unsafe { VirtualAlloc(hi as *const _, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) };
+                if !ptr.is_null() {
+                    return Ok(ptr as *mut u8);
+                }
+            }
+            hi = hi.saturating_add(GRANULARITY);
+        }
+
+        // Backward candidate
+        if lo > origin.saturating_sub(MAX_RANGE) {
+            let mut mbi = unsafe { std::mem::zeroed::<MEMORY_BASIC_INFORMATION>() };
+            let ok = unsafe { VirtualQuery(lo as *const _, &mut mbi, std::mem::size_of::<MEMORY_BASIC_INFORMATION>()) };
+            if ok != 0 && mbi.State == windows_sys::Win32::System::Memory::MEM_FREE {
+                let ptr = unsafe { VirtualAlloc(lo as *const _, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE) };
+                if !ptr.is_null() {
+                    return Ok(ptr as *mut u8);
+                }
+            }
+            lo = lo.saturating_sub(GRANULARITY);
+        }
+    }
+
+    unsafe { alloc_code(size) }
 }
 
 /// Release memory previously allocated via `alloc_code`.

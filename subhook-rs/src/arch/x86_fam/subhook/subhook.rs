@@ -1,5 +1,5 @@
 use crate::mem;
-use crate::disasm::x86_fam::disasm;
+use crate::disasm::x86_fam::{disasm, RelocHint};
 pub use crate::error::HookError;
 pub use crate::arch::x86_fam::subhook::shared::hookflags::HookFlags;
 use crate::arch::x86_fam::subhook::shared::jmp;
@@ -7,6 +7,8 @@ use crate::arch::x86_fam::subhook::shared::jmp;
 use std::ptr;
 
 const MAX_INSTRUCTIONN_LEN: usize = 15;
+/// Extra bytes reserved in the trampoline buffer to absorb short-jump expansions
+const EXPAND_BUDGET: usize = 64;
 
 struct Trampoline {
 	ptr: *mut u8,
@@ -20,6 +22,7 @@ pub struct Hook {
 	saved_bytes: Vec<u8>,
 	jmp_size: usize,
 	trampoline: Option<Trampoline>,
+	trampoline_err: Option<HookError>,
 	installed: bool,
 }
 
@@ -43,13 +46,14 @@ impl Hook {
 		// UNSAFE: This needs to be enforced by the caller!
 		let saved_bytes = unsafe { std::slice::from_raw_parts(src, jmp_size) }.to_vec();
 
-		unsafe { mem::unprotect(src, jmp_size ) }?;
-
 		let tail_jmp_size = jmp::tail_jmp_size();
-		let trampoline_size = jmp_size + MAX_INSTRUCTIONN_LEN + tail_jmp_size;
-		let trampoline = unsafe { build_trampoline(src, jmp_size, trampoline_size) }.ok();
+		let trampoline_size = jmp_size + MAX_INSTRUCTIONN_LEN + tail_jmp_size + EXPAND_BUDGET;
+		let (trampoline, trampoline_err) = match unsafe { build_trampoline(src, jmp_size, trampoline_size) } {
+			Ok(t) => (Some(t), None),
+			Err(e) => (None, Some(e)),
+		};
 
-		Ok(Self { src, dst, flags, saved_bytes, jmp_size, trampoline, installed: false })
+		Ok(Self { src, dst, flags, saved_bytes, jmp_size, trampoline, trampoline_err, installed: false })
 	}
 
 	/// Install the hook, overwriting the prologue of `src` with a jmp to `dst`.
@@ -57,9 +61,16 @@ impl Hook {
 		if self.installed {
 			return Err(HookError::AlreadyInstalled);
 		}
+		let mut patch = vec![0u8; self.jmp_size];
 		unsafe {
-			jmp::write_jmp(self.src, self.src as usize, self.dst as usize, self.flags)
+			jmp::write_jmp(
+				patch.as_mut_ptr(),
+				self.src as usize,
+				self.dst as usize,
+				self.flags,
+			)
 		}?;
+		unsafe { mem::patch_bytes(self.src, patch.as_ptr(), self.jmp_size) }?;
 		self.installed = true;
 		Ok(())
 	}
@@ -70,13 +81,7 @@ impl Hook {
 		if !self.installed {
 			return Err(HookError::NotInstalled);
 		}
-		unsafe {
-			ptr::copy_nonoverlapping(
-				self.saved_bytes.as_ptr(),
-				self.src,
-				self.jmp_size,
-			)
-		};
+		unsafe { mem::patch_bytes(self.src, self.saved_bytes.as_ptr(), self.jmp_size) }?;
 		self.installed = false;
 		Ok(())
 	}
@@ -112,9 +117,17 @@ impl Hook {
 			unsafe { crate::mem::suspend_thread(h) }?;
 		}
 
-		let result = unsafe {
-			jmp::write_jmp(self.src, self.src as usize, self.dst as usize, self.flags)
-		};
+		let mut patch = vec![0u8; self.jmp_size];
+		unsafe {
+			jmp::write_jmp(
+				patch.as_mut_ptr(),
+				self.src as usize,
+				self.dst as usize,
+				self.flags,
+			)
+		}?;
+
+		let result = unsafe { mem::patch_bytes(self.src, patch.as_ptr(), self.jmp_size) };
 
 		if result.is_ok() {
 			self.installed = true;
@@ -163,13 +176,7 @@ impl Hook {
 			unsafe { crate::mem::suspend_thread(h) }?;
 		}
 
-		unsafe {
-			ptr::copy_nonoverlapping(
-				self.saved_bytes.as_ptr(),
-				self.src,
-				self.jmp_size,
-			)
-		};
+		unsafe { mem::patch_bytes(self.src, self.saved_bytes.as_ptr(), self.jmp_size) }?;
 		self.installed = false;
 
 		if let Some(ref tramp) = self.trampoline {
@@ -201,6 +208,18 @@ impl Hook {
 		self.trampoline.as_ref().map(|t| t.ptr as *const u8)
 	}
 
+	/// Returns the error from trampoline building, if it failed.
+	/// Use this to diagnose `trampoline()` returning `None`.
+	pub fn trampoline_error(&self) -> Option<&HookError> {
+		self.trampoline_err.as_ref()
+	}
+
+	/// Returns the first `n` bytes of the hooked function's original prologue.
+	/// Use this to provide context in case you want to open an issue for the disasm.
+	pub fn prologue_bytes(&self, n: usize) -> Vec<u8> {
+		unsafe { std::slice::from_raw_parts(self.src, n) }.to_vec()
+	}
+
 	pub fn src(&self) -> *mut u8 { self.src }
 	pub fn dst(&self) -> *const u8 { self.dst }
 }
@@ -217,11 +236,12 @@ impl Drop for Hook {
 }
 
 unsafe fn build_trampoline(src: *const u8, jmp_size: usize, trampoline_size: usize) -> Result<Trampoline, HookError> {
-	let buffer = unsafe { mem::alloc_code(trampoline_size) }?;
+	let buffer = unsafe { mem::alloc_code_near(src, trampoline_size) }?;
 
 	let src_addr = src as usize;
 	let buffer_addr = buffer as usize;
 	let mut orig_size: usize = 0;
+	let mut buf_offset: usize = 0;
 
 	while orig_size < jmp_size {
 		let remaining = unsafe {
@@ -231,36 +251,86 @@ unsafe fn build_trampoline(src: *const u8, jmp_size: usize, trampoline_size: usi
 			)
 		};
 
-		let (instruction_len, relocation_opcode_offset) = disasm(remaining).inspect_err(|_| {
+		let (instruction_len, reloc) = disasm(remaining).inspect_err(|_| {
 			unsafe { mem::free_code(buffer, trampoline_size) };
 		})?;
 
-		unsafe {
-			ptr::copy_nonoverlapping(
-				(src_addr + orig_size) as *const u8, (buffer_addr + orig_size) as *mut u8, instruction_len
-			)
-		};
-
-		if let Some(op_offset) = relocation_opcode_offset {
-			if op_offset > 0 {
-				let offset = buffer_addr as i64 - src_addr as i64;
-
-				if offset < i32::MIN as i64 || offset > i32::MAX as i64 {
-					unsafe { mem::free_code(buffer, trampoline_size) };
-					return Err(HookError::TrampolineRelocateOverflow(offset));
-				}
-
-				let op_ptr = (buffer_addr + orig_size + op_offset) as *mut i32;
+		match reloc {
+			None => {
 				unsafe {
-					let old_value = op_ptr.read_unaligned();
-					op_ptr.write_unaligned(old_value - offset as i32);
+					ptr::copy_nonoverlapping(
+						(src_addr + orig_size) as *const u8,
+						(buffer_addr + buf_offset) as *mut u8,
+						instruction_len,
+					)
+				};
+				buf_offset += instruction_len;
+			}
+
+			Some(RelocHint::I32(op_offset)) => {
+				unsafe {
+					ptr::copy_nonoverlapping(
+						(src_addr + orig_size) as *const u8,
+						(buffer_addr + buf_offset) as *mut u8,
+						instruction_len,
+					)
+				};
+				if op_offset > 0 {
+					let pos_shift =
+						(buffer_addr + buf_offset) as i64 - (src_addr + orig_size) as i64;
+					if pos_shift < i32::MIN as i64 || pos_shift > i32::MAX as i64 {
+						unsafe { mem::free_code(buffer, trampoline_size) };
+						return Err(HookError::TrampolineRelocateOverflow(pos_shift));
+					}
+					let op_ptr = (buffer_addr + buf_offset + op_offset) as *mut i32;
+					unsafe {
+						let old_value = op_ptr.read_unaligned();
+						op_ptr.write_unaligned(old_value - pos_shift as i32);
+					}
 				}
+				buf_offset += instruction_len;
+			}
+
+			Some(RelocHint::ShortJcc(opcode)) => {
+				let disp8 = remaining[1] as i8 as i32;
+				let abs_target =
+					(src_addr as isize + orig_size as isize + 2 + disp8 as isize) as usize;
+				let new_disp = abs_target as i64 - (buffer_addr + buf_offset + 6) as i64;
+				if new_disp < i32::MIN as i64 || new_disp > i32::MAX as i64 {
+					unsafe { mem::free_code(buffer, trampoline_size) };
+					return Err(HookError::TrampolineRelocateOverflow(new_disp));
+				}
+				unsafe {
+					let out = (buffer_addr + buf_offset) as *mut u8;
+					out.write(0x0F);
+					out.add(1).write(0x80 | (opcode & 0x0F));
+					(out.add(2) as *mut i32).write_unaligned(new_disp as i32);
+				}
+				buf_offset += 6;
+			}
+
+			Some(RelocHint::ShortJmp) => {
+				let disp8 = remaining[1] as i8 as i32;
+				let abs_target =
+					(src_addr as isize + orig_size as isize + 2 + disp8 as isize) as usize;
+				let new_disp = abs_target as i64 - (buffer_addr + buf_offset + 5) as i64;
+				if new_disp < i32::MIN as i64 || new_disp > i32::MAX as i64 {
+					unsafe { mem::free_code(buffer, trampoline_size) };
+					return Err(HookError::TrampolineRelocateOverflow(new_disp));
+				}
+				unsafe {
+					let out = (buffer_addr + buf_offset) as *mut u8;
+					out.write(0xE9);
+					(out.add(1) as *mut i32).write_unaligned(new_disp as i32);
+				}
+				buf_offset += 5;
 			}
 		}
+
 		orig_size += instruction_len;
 	}
 
-	let tail_src = buffer_addr + orig_size;
+	let tail_src = buffer_addr + buf_offset;
 	let tail_dst = src_addr + orig_size;
 	let tail_flags = jmp::tail_flags();
 	if let Err(e) = unsafe { jmp::write_jmp(tail_src as *mut u8, tail_src, tail_dst, tail_flags) } {

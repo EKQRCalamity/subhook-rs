@@ -28,7 +28,7 @@ dependencies = [
 
 [[package]]
 name = "subhook-rs"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "libc",
  "subhook-rs-macros 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
